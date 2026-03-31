@@ -1,0 +1,17 @@
+@backend_HostAddress = http://localhost:5083
+
+GET {{backend_HostAddress}}/api/rag/status
+Accept: application/json
+
+###
+
+POST {{backend_HostAddress}}/api/chat
+Content-Type: application/json
+
+{
+  "message": "What is RAG?",
+  "model": "gemini-2.5-flash",
+  "useRag": true
+}
+
+###
