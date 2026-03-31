@@ -316,6 +316,23 @@ body {
   background: #ffffff;
 }
 
+.composer-icon-btn {
+  width: 42px;
+  height: 42px;
+  border: 1px solid #cbd5e1;
+  border-radius: 12px;
+  font: inherit;
+  font-weight: 800;
+  color: #0f172a;
+  background: #ffffff;
+  cursor: pointer;
+  flex: 0 0 auto;
+}
+
+.composer-icon-btn:hover {
+  background: #f1f5f9;
+}
+
 .chat-input {
   flex: 1;
   max-height: 180px;

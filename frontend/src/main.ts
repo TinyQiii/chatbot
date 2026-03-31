@@ -36,8 +36,6 @@ const MODEL_OPTIONS: ReadonlyArray<{ id: string; label: string }> = [
 ]
 
 const MODEL_STORAGE_KEY = 'chatrobot-gemini-model'
-const RAG_STORAGE_KEY = 'chatrobot-use-rag'
-const STRUCTURED_STORAGE_KEY = 'chatrobot-structured-output'
 const MESSAGES_STORAGE_KEY = 'chatrobot-messages-v1'
 const SESSIONS_STORAGE_KEY = 'chatrobot-sessions-v1'
 const MAX_INPUT_CHARS = 2000
@@ -81,21 +79,14 @@ app.innerHTML = `
             <select id="model-select" class="model-select" aria-label="Select model">
               ${modelOptionsHtml}
             </select>
-            <label class="rag-label">
-              <input id="rag-toggle" type="checkbox" class="rag-toggle" />
-              Use knowledge base (RAG)
-            </label>
-            <label class="structured-label">
-              <input id="structured-toggle" type="checkbox" class="structured-toggle" />
-              Structured JSON
-            </label>
-            <button id="clear-chat" type="button" class="clear-chat-btn">Clear chat</button>
           </div>
         </header>
 
         <section id="message-list" class="message-list" aria-live="polite"></section>
 
         <form id="chat-form" class="chat-form">
+          <input id="pdf-upload" type="file" class="composer-file-input" accept="application/pdf" hidden />
+          <button id="pick-pdf" type="button" class="composer-icon-btn" aria-label="Attach PDF">+</button>
           <textarea
             id="chat-input"
             class="chat-input"
@@ -117,11 +108,10 @@ const chatInput = document.querySelector<HTMLTextAreaElement>('#chat-input')
 const stopButton = document.querySelector<HTMLButtonElement>('#stop-btn')
 const sendButton = document.querySelector<HTMLButtonElement>('#send-btn')
 const modelSelect = document.querySelector<HTMLSelectElement>('#model-select')
-const ragToggle = document.querySelector<HTMLInputElement>('#rag-toggle')
-const structuredToggle = document.querySelector<HTMLInputElement>('#structured-toggle')
-const clearChatButton = document.querySelector<HTMLButtonElement>('#clear-chat')
 const newChatButton = document.querySelector<HTMLButtonElement>('#new-chat')
 const chatHistoryList = document.querySelector<HTMLUListElement>('#chat-history')
+const pdfUploadInput = document.querySelector<HTMLInputElement>('#pdf-upload')
+const pickPdfButton = document.querySelector<HTMLButtonElement>('#pick-pdf')
 
 if (
   !messageList ||
@@ -130,11 +120,10 @@ if (
   !stopButton ||
   !sendButton ||
   !modelSelect ||
-  !ragToggle ||
-  !structuredToggle ||
-  !clearChatButton ||
   !newChatButton ||
-  !chatHistoryList
+  !chatHistoryList ||
+  !pdfUploadInput ||
+  !pickPdfButton
 ) {
   throw new Error('Chat elements not found')
 }
@@ -145,11 +134,10 @@ const safeChatInput = chatInput
 const safeStopButton = stopButton
 const safeSendButton = sendButton
 const safeModelSelect = modelSelect
-const safeRagToggle = ragToggle
-const safeStructuredToggle = structuredToggle
-const safeClearChatButton = clearChatButton
 const safeNewChatButton = newChatButton
 const safeChatHistoryList = chatHistoryList
+const safePdfUploadInput = pdfUploadInput
+const safePickPdfButton = pickPdfButton
 
 function getStoredModelId(): string | null {
   try {
@@ -167,37 +155,8 @@ function persistModelId(id: string) {
   }
 }
 
-function getStoredRagEnabled(): boolean {
-  try {
-    return localStorage.getItem(RAG_STORAGE_KEY) === 'true'
-  } catch {
-    return false
-  }
-}
-
-function persistRagEnabled(enabled: boolean) {
-  try {
-    localStorage.setItem(RAG_STORAGE_KEY, enabled ? 'true' : 'false')
-  } catch {
-    // ignore
-  }
-}
-
-function getStoredStructuredEnabled(): boolean {
-  try {
-    return localStorage.getItem(STRUCTURED_STORAGE_KEY) === 'true'
-  } catch {
-    return false
-  }
-}
-
-function persistStructuredEnabled(enabled: boolean) {
-  try {
-    localStorage.setItem(STRUCTURED_STORAGE_KEY, enabled ? 'true' : 'false')
-  } catch {
-    // ignore
-  }
-}
+const RAG_ENABLED = true
+const STRUCTURED_ENABLED = true
 
 function slugifyTitle(text: string): string {
   const line = text.trim().split('\n')[0] ?? ''
@@ -402,24 +361,68 @@ function renderSidebarList() {
   }
 }
 
+async function uploadPdf(file: File) {
+  const form = new FormData()
+  form.append('file', file)
+
+  safePickPdfButton.disabled = true
+  safePickPdfButton.textContent = '…'
+
+  try {
+    const res = await fetch('/api/rag/upload', { method: 'POST', body: form })
+    const text = await res.text()
+    if (!res.ok) {
+      throw new Error(text || `HTTP ${res.status}`)
+    }
+
+    let uploaded: { sourceId?: string; chunkCount?: number } | null = null
+    try {
+      uploaded = JSON.parse(text)
+    } catch {
+      uploaded = null
+    }
+
+    const sourceId = uploaded?.sourceId ?? file.name
+    const chunkCount =
+      typeof uploaded?.chunkCount === 'number' && Number.isFinite(uploaded.chunkCount)
+        ? uploaded.chunkCount
+        : undefined
+
+    // Auto-enable RAG so the user can immediately ask questions.
+    // RAG is always enabled.
+
+    messages.push({
+      role: 'assistant',
+      text:
+        `Uploaded PDF: ${sourceId}` +
+        (chunkCount ? ` (chunks: ${chunkCount})` : '') +
+        `\n\nRAG is now enabled. Ask me questions about this PDF.`
+    })
+    renderMessages()
+  } finally {
+    safePickPdfButton.disabled = false
+    safePickPdfButton.textContent = '+'
+    safePdfUploadInput.value = ''
+  }
+}
+
+safePickPdfButton.addEventListener('click', () => {
+  safePdfUploadInput.click()
+})
+
+safePdfUploadInput.addEventListener('change', () => {
+  const file = safePdfUploadInput.files?.[0]
+  if (!file) return
+  void uploadPdf(file)
+})
+
 const stored = getStoredModelId()
 if (stored && MODEL_OPTIONS.some((option) => option.id === stored)) {
   safeModelSelect.value = stored
 }
 
-safeRagToggle.checked = getStoredRagEnabled()
-safeStructuredToggle.checked = getStoredStructuredEnabled()
-
 safeModelSelect.addEventListener('change', () => {
   persistModelId(safeModelSelect.value)
-})
-
-safeRagToggle.addEventListener('change', () => {
-  persistRagEnabled(safeRagToggle.checked)
-})
-
-safeStructuredToggle.addEventListener('change', () => {
-  persistStructuredEnabled(safeStructuredToggle.checked)
 })
 
 let activeAbortController: AbortController | null = null
@@ -464,19 +467,6 @@ safeNewChatButton.addEventListener('click', () => {
   renderMessages()
 })
 
-safeClearChatButton.addEventListener('click', () => {
-  if (isStreaming) {
-    stopStreaming()
-  }
-  const s = chats.find((c) => c.id === activeChatId)
-  if (s) {
-    s.messages.splice(0, s.messages.length, ...initialMessages)
-    s.title = 'New chat'
-    messages = s.messages
-  }
-  renderMessages()
-})
-
 function setSendingState(isSending: boolean) {
   safeSendButton.disabled = isSending
   safeSendButton.textContent = isSending ? 'Sending...' : 'Send'
@@ -501,8 +491,6 @@ function stopStreaming() {
   updateStopButtonState()
   setSendingState(false)
   safeModelSelect.disabled = false
-  safeRagToggle.disabled = false
-  safeStructuredToggle.disabled = false
   setSidebarBusy(false)
 }
 
@@ -521,7 +509,7 @@ async function streamAssistantReply(input: string, onChunk: (text: string) => vo
       message: input,
       model: safeModelSelect.value,
       history,
-      useRag: safeRagToggle.checked
+      useRag: RAG_ENABLED
     })
   })
 
@@ -561,7 +549,7 @@ async function requestStructuredReply(input: string): Promise<{
     body: JSON.stringify({
       message: input,
       model: safeModelSelect.value,
-      useRag: safeRagToggle.checked
+      useRag: RAG_ENABLED
     })
   })
 
@@ -659,13 +647,11 @@ safeChatForm.addEventListener('submit', async (event) => {
   autoResizeTextarea()
   setSendingState(true)
   safeModelSelect.disabled = true
-  safeRagToggle.disabled = true
-  safeStructuredToggle.disabled = true
   setSidebarBusy(true)
   isStreaming = true
   updateStopButtonState()
   try {
-    if (safeStructuredToggle.checked) {
+    if (STRUCTURED_ENABLED) {
       const result = await requestStructuredReply(content)
       const citationsText =
         result.citations.length > 0
@@ -692,8 +678,6 @@ safeChatForm.addEventListener('submit', async (event) => {
     updateStopButtonState()
     setSendingState(false)
     safeModelSelect.disabled = false
-    safeRagToggle.disabled = false
-    safeStructuredToggle.disabled = false
     setSidebarBusy(false)
     touchActiveSession()
     renderSidebarList()

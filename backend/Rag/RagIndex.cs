@@ -39,6 +39,22 @@ public sealed class RagIndex
         }
     }
 
+    public IReadOnlyList<RagChunk> GetChunksForSource(string sourceId)
+    {
+        if (string.IsNullOrWhiteSpace(sourceId))
+        {
+            return Array.Empty<RagChunk>();
+        }
+
+        lock (_gate)
+        {
+            return _chunks
+                .Where(c => string.Equals(c.SourceId, sourceId, StringComparison.OrdinalIgnoreCase))
+                .OrderBy(c => c.ChunkIndex)
+                .ToArray();
+        }
+    }
+
     public async Task InitializeAsync(
         string dataDirectory,
         string apiKey,
@@ -122,6 +138,61 @@ public sealed class RagIndex
             LastError = ex.Message;
             IsReady = false;
         }
+    }
+
+    public async Task<(string SourceId, int ChunkCount)> UpsertSourceAsync(
+        string sourceId,
+        string text,
+        string apiKey,
+        HttpClient http,
+        CancellationToken cancellationToken)
+    {
+        if (string.IsNullOrWhiteSpace(sourceId))
+        {
+            throw new ArgumentException("sourceId is required.", nameof(sourceId));
+        }
+        if (string.IsNullOrWhiteSpace(text))
+        {
+            throw new ArgumentException("text is required.", nameof(text));
+        }
+
+        var normalized = NormalizeText(text);
+        var planned = new List<(string sourceId, int chunkIndex, string text)>();
+        var idx = 0;
+        foreach (var chunk in ChunkText(normalized, maxChars: 1200, overlapChars: 180))
+        {
+            if (string.IsNullOrWhiteSpace(chunk))
+            {
+                continue;
+            }
+            planned.Add((sourceId, idx, chunk));
+            idx++;
+        }
+
+        if (planned.Count == 0)
+        {
+            throw new InvalidOperationException("No chunks produced from input text.");
+        }
+
+        var embeddings = await BatchEmbedDocumentsAsync(planned, apiKey, http, cancellationToken);
+        if (embeddings.Count != planned.Count)
+        {
+            throw new InvalidOperationException($"Embedding count mismatch. Planned={planned.Count}, Got={embeddings.Count}");
+        }
+
+        lock (_gate)
+        {
+            _chunks.RemoveAll(c => string.Equals(c.SourceId, sourceId, StringComparison.OrdinalIgnoreCase));
+            for (var i = 0; i < planned.Count; i++)
+            {
+                var item = planned[i];
+                _chunks.Add(new RagChunk(item.sourceId, item.chunkIndex, item.text, embeddings[i]));
+            }
+        }
+
+        IsReady = true;
+        LastError = null;
+        return (sourceId, planned.Count);
     }
 
     public async Task<IReadOnlyList<(RagChunk Chunk, double Score)>> SearchAsync(

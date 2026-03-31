@@ -33,3 +33,9 @@
 /Users/yuki/Desktop/ReactLearn/chatrobot/backend/obj/Debug/net8.0/ref/backend.dll
 /Users/yuki/Desktop/ReactLearn/chatrobot/backend/bin/Debug/net8.0/Data/chatrobot-overview.md
 /Users/yuki/Desktop/ReactLearn/chatrobot/backend/bin/Debug/net8.0/Data/support-faq.md
+/Users/yuki/Desktop/ReactLearn/chatrobot/backend/bin/Debug/net8.0/UglyToad.PdfPig.dll
+/Users/yuki/Desktop/ReactLearn/chatrobot/backend/bin/Debug/net8.0/UglyToad.PdfPig.Core.dll
+/Users/yuki/Desktop/ReactLearn/chatrobot/backend/bin/Debug/net8.0/UglyToad.PdfPig.Fonts.dll
+/Users/yuki/Desktop/ReactLearn/chatrobot/backend/bin/Debug/net8.0/UglyToad.PdfPig.Tokenization.dll
+/Users/yuki/Desktop/ReactLearn/chatrobot/backend/bin/Debug/net8.0/UglyToad.PdfPig.Tokens.dll
+/Users/yuki/Desktop/ReactLearn/chatrobot/backend/obj/Debug/net8.0/backend.sourcelink.json

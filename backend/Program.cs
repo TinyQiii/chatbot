@@ -301,6 +301,198 @@ app.MapGet("/api/rag/status", (RagIndex rag) =>
 .WithName("RagStatus")
 .WithOpenApi();
 
+app.MapPost("/api/rag/upload", async (
+    HttpContext http,
+    IFormFile file,
+    IConfiguration config,
+    IWebHostEnvironment env,
+    IHttpClientFactory httpClientFactory,
+    RagIndex rag) =>
+{
+    var apiKey = config["Google:ApiKey"] ?? Environment.GetEnvironmentVariable("GEMINI_API_KEY");
+    if (string.IsNullOrWhiteSpace(apiKey))
+    {
+        return Results.Problem("Missing Gemini API key. Configure Google:ApiKey or GEMINI_API_KEY.");
+    }
+
+    if (file is null || file.Length == 0)
+    {
+        return Results.BadRequest(new { error = "File is required." });
+    }
+
+    var originalName = Path.GetFileName(file.FileName);
+    if (!originalName.EndsWith(".pdf", StringComparison.OrdinalIgnoreCase))
+    {
+        return Results.BadRequest(new { error = "Only .pdf files are supported." });
+    }
+
+    var uploadDir = Path.Combine(env.ContentRootPath, "Data", "Uploads");
+    Directory.CreateDirectory(uploadDir);
+
+    var safeName = $"{Path.GetFileNameWithoutExtension(originalName)}-{DateTimeOffset.UtcNow:yyyyMMdd-HHmmss}.pdf";
+    var savedPath = Path.Combine(uploadDir, safeName);
+
+    await using (var fs = File.Create(savedPath))
+    {
+        await file.CopyToAsync(fs, http.RequestAborted);
+    }
+
+    string extracted;
+    await using (var pdfStream = File.OpenRead(savedPath))
+    {
+        extracted = PdfTextExtractor.ExtractAllText(pdfStream);
+    }
+
+    if (string.IsNullOrWhiteSpace(extracted))
+    {
+        return Results.BadRequest(new { error = "Could not extract text from PDF." });
+    }
+
+    var client = httpClientFactory.CreateClient();
+    var sourceId = safeName;
+    var result = await rag.UpsertSourceAsync(sourceId, extracted, apiKey, client, http.RequestAborted);
+
+    return Results.Ok(new
+    {
+        sourceId = result.SourceId,
+        chunkCount = result.ChunkCount
+    });
+})
+.DisableAntiforgery()
+.WithName("RagUploadPdf")
+.WithOpenApi();
+
+app.MapGet("/api/rag/sources", (RagIndex rag) =>
+{
+    return Results.Ok(new
+    {
+        sources = rag.SourceIds
+    });
+})
+.WithName("RagSources")
+.WithOpenApi();
+
+app.MapGet("/api/rag/summarize", async (
+    string sourceId,
+    IConfiguration config,
+    IHttpClientFactory httpClientFactory,
+    RagIndex rag,
+    HttpContext httpContext) =>
+{
+    var apiKey = config["Google:ApiKey"] ?? Environment.GetEnvironmentVariable("GEMINI_API_KEY");
+    if (string.IsNullOrWhiteSpace(apiKey))
+    {
+        return Results.Problem("Missing Gemini API key. Configure Google:ApiKey or GEMINI_API_KEY.");
+    }
+
+    if (string.IsNullOrWhiteSpace(sourceId))
+    {
+        return Results.BadRequest(new { error = "sourceId is required." });
+    }
+
+    var chunks = rag.GetChunksForSource(sourceId);
+    if (chunks.Count == 0)
+    {
+        return Results.NotFound(new { error = "Source not found in index. Upload it first, or restart the backend after adding Data files." });
+    }
+
+    const int maxContextChars = 12000;
+    var contextBuilder = new StringBuilder();
+    foreach (var c in chunks)
+    {
+        if (contextBuilder.Length >= maxContextChars)
+        {
+            break;
+        }
+
+        var block = $"[SOURCE:{c.SourceId}#{c.ChunkIndex}]\n{c.Text}\n\n";
+        if (contextBuilder.Length + block.Length > maxContextChars)
+        {
+            contextBuilder.Append(block[..Math.Max(0, maxContextChars - contextBuilder.Length)]);
+            break;
+        }
+
+        contextBuilder.Append(block);
+    }
+
+    var schema = new
+    {
+        type = "object",
+        properties = new
+        {
+            summary = new { type = "string", description = "A concise summary of the document." },
+            keyPoints = new
+            {
+                type = "array",
+                items = new { type = "string" },
+                description = "3-8 key bullet points."
+            },
+            suggestedQuestions = new
+            {
+                type = "array",
+                items = new { type = "string" },
+                description = "5 suggested questions a user can ask about this document."
+            }
+        },
+        required = new[] { "summary", "keyPoints", "suggestedQuestions" },
+        additionalProperties = false,
+        propertyOrdering = new[] { "summary", "keyPoints", "suggestedQuestions" }
+    };
+
+    var prompt =
+        "You are summarizing a single uploaded PDF document. Use only the provided CONTEXT.\n\n"
+        + $"CONTEXT:\n{contextBuilder}\n\n"
+        + "Return ONLY JSON matching the schema.";
+
+    var body = new
+    {
+        systemInstruction = new
+        {
+            parts = new[] { new { text = $"{SystemPrompt} {RagSystemAddendum}" } }
+        },
+        contents = new object[]
+        {
+            new
+            {
+                role = "user",
+                parts = new[] { new { text = prompt } }
+            }
+        },
+        generationConfig = new
+        {
+            responseMimeType = "application/json",
+            responseJsonSchema = schema
+        }
+    };
+
+    var json = JsonSerializer.Serialize(body);
+    var endpoint =
+        $"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key={apiKey}";
+
+    var client = httpClientFactory.CreateClient();
+    using var resp = await client.PostAsync(
+        endpoint,
+        new StringContent(json, Encoding.UTF8, "application/json"),
+        httpContext.RequestAborted);
+
+    var text = await resp.Content.ReadAsStringAsync(httpContext.RequestAborted);
+    if (!resp.IsSuccessStatusCode)
+    {
+        return Results.Problem($"Gemini request failed: {text}");
+    }
+
+    using var doc = JsonDocument.Parse(text);
+    var reply = TryReadGeminiReply(doc.RootElement);
+    if (string.IsNullOrWhiteSpace(reply))
+    {
+        return Results.Problem("Gemini response did not contain text.");
+    }
+
+    return Results.Text(reply, "application/json; charset=utf-8");
+})
+.WithName("RagSummarize")
+.WithOpenApi();
+
 app.MapPost("/api/chat/structured", async (
     ChatRequest request,
     IConfiguration config,

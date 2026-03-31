@@ -1,59 +1,56 @@
-<<<<<<< HEAD
-# chatbot
-=======
 # chatrobot
 
-一个小型全栈 Gemini Chat Demo：
+Small full-stack Gemini chat demo:
 
-- **Streaming chat**：前端实时显示流式输出（`/api/chat/stream`）
-- **RAG**：读取本地 `backend/Data/*.md`（切块 + embedding + 相似度检索），回答带引用 `[SOURCE:filename#chunk]`
-- **Structured outputs**：JSON schema 结构化返回（`/api/chat/structured`），前端可渲染 Sources
-- **多会话侧边栏**：支持新建/切换会话；聊天记录持久化到 `localStorage`
+- **Streaming chat**: token-by-token UI updates (`/api/chat/stream`)
+- **RAG**: loads local `backend/Data/*.md` (chunking + embeddings + similarity search) and answers with citations like `[SOURCE:filename#chunk]`
+- **Structured outputs**: JSON Schema response (`/api/chat/structured`) so the UI can render “Sources”
+- **Multi-chat sidebar**: create/switch chats; sessions are persisted in `localStorage`
 
-## 目录结构
+## Structure
 
 ```
 chatrobot/
-  backend/    # .NET 8 minimal APIs（Gemini proxy + RAG + structured）
-  frontend/   # Vite + TypeScript（纯 DOM 实现，不是 React）
+  backend/    # .NET 8 minimal APIs (Gemini proxy + RAG + structured output)
+  frontend/   # Vite + TypeScript (plain DOM, not React)
 ```
 
-## 运行方式
+## Run
 
-### 1) 启动后端（.NET 8）
+### 1) Backend (.NET 8)
 
-进入目录：
+Go to:
 
 ```bash
 cd chatrobot/backend
 ```
 
-配置 Gemini API Key（二选一）：
+Configure the Gemini API key (choose one):
 
-- **方式 A（推荐）**：环境变量
+- **Option A (recommended)**: environment variable
 
 ```bash
 export GEMINI_API_KEY="YOUR_KEY"
 ```
 
-- **方式 B**：User Secrets
+- **Option B**: .NET user secrets
 
 ```bash
 dotnet user-secrets init
 dotnet user-secrets set "Google:ApiKey" "YOUR_KEY"
 ```
 
-启动：
+Start:
 
 ```bash
 dotnet run
 ```
 
-后端默认地址通常是 `http://localhost:5083`，并带 Swagger：`/swagger`
+Default backend URL is typically `http://localhost:5083` with Swagger at `/swagger`.
 
-### 2) 启动前端（Vite）
+### 2) Frontend (Vite)
 
-新开一个终端：
+Open a new terminal:
 
 ```bash
 cd chatrobot/frontend
@@ -61,17 +58,17 @@ npm install
 npm run dev
 ```
 
-前端会通过 Vite proxy 将 `/api/*` 代理到 `http://localhost:5083`（见 `frontend/vite.config.ts`）。
+The frontend proxies `/api/*` to `http://localhost:5083` via Vite (see `frontend/vite.config.ts`).
 
-## 使用说明
+## Usage
 
 ### RAG
 
-- 在 UI 勾选 **Use knowledge base (RAG)**
-- 知识库文件位于：`chatrobot/backend/Data/`
-- 修改/新增 `Data/*.md` 后，**需要重启后端**（索引在启动时构建）
+- Enable **Use knowledge base (RAG)** in the UI
+- Knowledge base files live in `chatrobot/backend/Data/`
+- After editing/adding `Data/*.md`, **restart the backend** (index is built on startup)
 
-可直接测试（复制到输入框）：
+Test prompts (copy into the input box):
 
 - `How do I enable RAG? RAG-DEMO-ENABLE`
 - `What citation format should I expect? RAG-DEMO-CITATIONS`
@@ -79,13 +76,11 @@ npm run dev
 
 ### Structured JSON
 
-- 在 UI 勾选 **Structured JSON**
-- 前端会走 `POST /api/chat/structured`，后端让模型按 JSON schema 返回：
-  - `answer`：最终答案
-  - `citations[]`：引用列表（如有）
+- Enable **Structured JSON** in the UI
+- The UI calls `POST /api/chat/structured`. The backend asks the model to return JSON that matches a schema:
+  - `answer`: final answer text
+  - `citations[]`: citations (if any)
 
-## 常见问题
+## Troubleshooting
 
-- **遇到 429 Too Many Requests**：通常是 Gemini 配额/限流（RAG 还会额外调用 embedding，更容易触发）。可以等一会儿再试、关闭 RAG 或降低请求频率。
-
->>>>>>> 8203783 (first commit)
+- **429 Too Many Requests**: usually Gemini quota / rate limiting (RAG adds embedding calls, so it hits limits faster). Wait a bit, disable RAG, or reduce request frequency.
